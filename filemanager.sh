@@ -226,9 +226,15 @@ MimeType=inode/directory;
 StartupNotify=true
 EOF
 
-# Назначаем дефолтным для папок
-xdg-mime default filetree.desktop inode/directory
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+xdg-mime default filetree.desktop inode/directory 2>/dev/null || true
+
+# XFCE использует свой канал настроек
+xfconf-query -c xfce4-mime-helper -p /helpers/FileManager \
+  --create -t string -s filetree.desktop 2>/dev/null || \
+xfconf-query -c xfce4-mime-helper -p /helpers/FileManager \
+  -t string -s filetree.desktop 2>/dev/null || true
+
 ok "Зарегистрирован как файловый менеджер по умолчанию"
 
 # ─── 8. Запуск ───────────────────────────────────────────────────────
