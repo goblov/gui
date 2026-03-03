@@ -55,13 +55,11 @@ EOF
 import React from "react";import ReactDOM from "react-dom/client";import App from "./App.jsx";
 ReactDOM.createRoot(document.getElementById("root")).render(<React.StrictMode><App/></React.StrictMode>);
 EOF
-
   ok "Файлы проекта созданы"
 else
   ok "Проект существует — пропускаю"
 fi
 
-# App.jsx через python чтобы избежать проблем с кавычками в heredoc
 python3 - << 'PYEOF'
 import os
 src = os.path.expanduser("~/.filetree/src")
@@ -70,8 +68,6 @@ app_path = os.path.join(src, "App.jsx")
 if os.path.exists(app_path):
     print("App.jsx exists — skip")
 else:
-    code = open("/dev/stdin").read() if False else None
-    # write inline
     with open(app_path, "w") as f:
         f.write("""import { useState, useEffect, useCallback } from "react";
 const DEFAULT_COLOR = "#b39ddb";
@@ -178,7 +174,6 @@ export default function App() {
     print("App.jsx written")
 PYEOF
 
-# ─── 3. React + Vite (без electron — быстро) ─────────────────────────
 if [ ! -f "$VITE_BIN" ]; then
   log "Установка React + Vite..."
   cd "$DIR"
@@ -189,9 +184,8 @@ else
   ok "React + Vite — пропускаю"
 fi
 
-# ─── 4. Electron отдельно с зеркалом ─────────────────────────────────
 if [ ! -f "$ELECTRON_BIN" ]; then
-  log "Установка Electron (может занять несколько минут)..."
+  log "Установка Electron..."
   cd "$DIR"
   export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
   npm install electron@28 --save-dev || fail "Не удалось установить Electron"
@@ -200,7 +194,6 @@ else
   ok "Electron — пропускаю"
 fi
 
-# ─── 5. Сборка ───────────────────────────────────────────────────────
 if [ ! -d "$DIR/dist" ]; then
   log "Сборка интерфейса..."
   cd "$DIR"
@@ -210,37 +203,22 @@ else
   ok "Интерфейс собран — пропускаю"
 fi
 
-# ─── 7. Регистрация как файловый менеджер ────────────────────────────
-
-# Wrapper-скрипт в PATH — exo проверяет что бинарник существует
+# ─── Регистрация как файловый менеджер ───────────────────────────────
+WRAPPER="$HOME/.local/bin/filetree"
 mkdir -p "$HOME/.local/bin"
-cat > "$HOME/.local/bin/filetree" << 'WEOF'
-#!/bin/bash
-ELECTRON_BIN="$HOME/.filetree/node_modules/.bin/electron"
-DIR="$HOME/.filetree"
-export DISPLAY="${DISPLAY:-:0}"
-exec "$ELECTRON_BIN" "$DIR" --no-sandbox "$@"
-WEOF
-chmod +x "$HOME/.local/bin/filetree"
 
-DESKTOP_FILE="$HOME/.local/share/applications/filetree.desktop"
+# Wrapper с реальными путями (не $HOME)
+cat > "$WRAPPER" << EOF
+#!/bin/bash
+export DISPLAY="\${DISPLAY:-:0}"
+exec "$ELECTRON_BIN" "$DIR" --no-sandbox "\$@"
+EOF
+chmod +x "$WRAPPER"
+
+# .desktop с реальными путями через printf (не heredoc — иначе $HOME не раскрывается)
+DESKTOP="$HOME/.local/share/applications/filetree.desktop"
 mkdir -p "$HOME/.local/share/applications"
-cat > "$DESKTOP_FILE" << 'DEOF'
-[Desktop Entry]
-Version=1.0
-Name=FileTree
-GenericName=File Manager
-Comment=Custom file manager
-Exec=$HOME/.local/bin/filetree %U
-Icon=system-file-manager
-Terminal=false
-Type=Application
-Categories=System;FileManager;
-MimeType=inode/directory;x-directory/normal;
-StartupNotify=true
-X-XFCE-Binaries=$HOME/.local/bin/filetree
-X-XFCE-Category=FileManager
-DEOF
+printf '[Desktop Entry]\nVersion=1.0\nName=FileTree\nGenericName=File Manager\nComment=Custom file manager\nExec=%s %%U\nIcon=system-file-manager\nTerminal=false\nType=Application\nCategories=System;FileManager;\nMimeType=inode/directory;x-directory/normal;\nStartupNotify=true\nX-XFCE-Binaries=%s\nX-XFCE-Category=FileManager\n' "$WRAPPER" "$WRAPPER" > "$DESKTOP"
 
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 
@@ -248,10 +226,9 @@ update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 MIMEAPPS="$HOME/.config/mimeapps.list"
 mkdir -p "$HOME/.config"
 grep -q "^\[Default Applications\]" "$MIMEAPPS" 2>/dev/null || echo "[Default Applications]" > "$MIMEAPPS"
-sed -i '/^inode\/directory=/d' "$MIMEAPPS" 2>/dev/null || true
-sed -i '/^x-directory\/normal=/d' "$MIMEAPPS" 2>/dev/null || true
-sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop' "$MIMEAPPS"
-sed -i '/^\[Default Applications\]/a x-directory\/normal=filetree.desktop' "$MIMEAPPS"
+sed -i '/^inode\/directory=/d' "$MIMEAPPS"
+sed -i '/^x-directory\/normal=/d' "$MIMEAPPS"
+sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop' "$MIMEAPPS"
 
 # helpers.rc
 mkdir -p "$HOME/.config/xfce4"
@@ -262,17 +239,16 @@ else
   echo "FileManager=filetree" >> "$HELPERS_RC"
 fi
 
+# Добавить ~/.local/bin в PATH
+grep -q 'local/bin' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+export PATH="$HOME/.local/bin:$PATH"
+
 pkill -f "Thunar" 2>/dev/null || true
 xfdesktop --reload 2>/dev/null || true
 sleep 1
-
-# Добавить ~/.local/bin в PATH если ещё нет
-grep -q 'HOME/.local/bin' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-export PATH="$HOME/.local/bin:$PATH"
-
 ok "Зарегистрирован как файловый менеджер по умолчанию"
 
-# ─── 8. Запуск ───────────────────────────────────────────────────────
+# ─── Запуск ──────────────────────────────────────────────────────────
 log "Запуск FileTree..."
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
