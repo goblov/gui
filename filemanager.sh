@@ -1,5 +1,4 @@
 #!/bin/bash
-set -eo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
 log()  { echo -e "${CYAN}> $1${NC}"; }
 ok()   { echo -e "${GREEN}OK: $1${NC}"; }
@@ -11,15 +10,37 @@ VITE_BIN="$DIR/node_modules/.bin/vite"
 WRAPPER="$HOME/.local/bin/filetree"
 THUNAR_WRAPPER="$HOME/.local/bin/thunar"
 
+# Node.js
 log "Checking Node.js..."
 if ! command -v node &>/dev/null; then
-  sudo apt-get update -qq && sudo apt-get install -y nodejs npm || fail "Cannot install Node.js"
+  log "Node.js not found, installing..."
+  if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+    sudo apt-get update -qq && sudo apt-get install -y nodejs npm || fail "Cannot install Node.js"
+  elif [ "$(id -u)" = "0" ]; then
+    apt-get update -qq && apt-get install -y nodejs npm || fail "Cannot install Node.js"
+  else
+    fail "Node.js not found. Run: sudo apt-get install nodejs npm"
+  fi
 fi
 ok "Node.js $(node --version)"
 
+# Remove Thunar
+log "Removing Thunar..."
+if command -v thunar &>/dev/null || dpkg -l thunar &>/dev/null 2>&1; then
+  if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+    sudo apt-get remove -y thunar thunar-archive-plugin thunar-media-tags-plugin thunar-volman 2>/dev/null || true
+  elif [ "$(id -u)" = "0" ]; then
+    apt-get remove -y thunar thunar-archive-plugin thunar-media-tags-plugin thunar-volman 2>/dev/null || true
+  else
+    ok "Thunar found but cannot remove without sudo (skipping)"
+  fi
+  ok "Thunar removed"
+else
+  ok "Thunar not installed -- skip"
+fi
+
 mkdir -p "$DIR/src"
 
-# package.json
 [ -f "$DIR/package.json" ] || echo '{"name":"filetree","version":"1.0.0","main":"main.js","dependencies":{"react":"^18.2.0","react-dom":"^18.2.0"},"devDependencies":{"@vitejs/plugin-react":"^4.0.0","vite":"^5.0.0"}}' > "$DIR/package.json"
 
 cat > "$DIR/vite.config.js" << 'VEOF'
@@ -75,7 +96,6 @@ REOF
 
 ok "Project files written"
 
-# App.jsx written via python to avoid bash escaping issues
 log "Writing App.jsx..."
 python3 - << 'PYEOF'
 import json, os
@@ -83,13 +103,13 @@ content = "import { useState, useEffect, useCallback, useRef } from \"react\";\n
 dest = os.path.expanduser("~/.filetree/src/App.jsx")
 with open(dest, "w") as f:
     f.write(content)
-print("App.jsx written")
+print("App.jsx OK")
 PYEOF
 
+# Install dependencies
 if [ ! -f "$VITE_BIN" ]; then
   log "Installing React + Vite..."
   cd "$DIR"
-  npm config set registry https://registry.npmmirror.com
   npm install || fail "npm install failed"
   ok "React + Vite installed"
 else
@@ -106,24 +126,15 @@ else
   ok "Electron -- skip"
 fi
 
-# Always rebuild
+[ -f "$ELECTRON_BIN" ] || fail "Electron binary not found at $ELECTRON_BIN -- installation failed"
+
 log "Building interface..."
 rm -rf "$DIR/dist"
 cd "$DIR"
 "$VITE_BIN" build --logLevel warn || fail "Build failed"
 ok "Build complete"
 
-# === REMOVE THUNAR ===
-log "Removing Thunar..."
-if command -v thunar &>/dev/null; then
-  sudo apt-get remove -y thunar thunar-archive-plugin thunar-media-tags-plugin thunar-volman 2>/dev/null || true
-  ok "Thunar removed"
-else
-  ok "Thunar not installed -- skip"
-fi
-
-# === REGISTRATION ===
-log "Registering as default file manager..."
+log "Registering FileTree as default file manager..."
 
 mkdir -p "$HOME/.local/bin"
 
@@ -133,51 +144,52 @@ printf '#!/bin/bash\nexport DISPLAY="${DISPLAY:-:0}"\nif [ -n "$1" ] && [ -d "$1
 chmod +x "$WRAPPER"
 ok "Wrapper: $WRAPPER"
 
-# fake thunar wrapper
+# fake thunar (xfdesktop may call thunar directly by name)
 printf '#!/bin/bash\nexport DISPLAY="${DISPLAY:-:0}"\nfor arg in "$@"; do\n  [[ "$arg" == --* ]] && continue\n  [ -d "$arg" ] && exec "%s" "%s" --no-sandbox "$arg"\ndone\nexec "%s" "%s" --no-sandbox\n' \
   "$ELECTRON_BIN" "$DIR" "$ELECTRON_BIN" "$DIR" > "$THUNAR_WRAPPER"
 chmod +x "$THUNAR_WRAPPER"
 ok "Fake thunar: $THUNAR_WRAPPER"
 
+# XFCE helper
 HELPERS_DIR="$HOME/.local/share/xfce4/helpers"
 mkdir -p "$HELPERS_DIR"
 printf '[Desktop Entry]\nVersion=1.0\nEncoding=UTF-8\nType=X-XFCE-Helper\nX-XFCE-Helper-Name=FileTree\nX-XFCE-Helper-Category=FileManager\nX-XFCE-Binaries=%s;\nX-XFCE-Commands=%s;\nX-XFCE-CommandsWithParameter=%s "%%s";\nIcon=system-file-manager\nName=FileTree\n' \
   "$WRAPPER" "$WRAPPER" "$WRAPPER" > "$HELPERS_DIR/filetree.desktop"
 ok "XFCE helper created"
 
+# helpers.rc
 mkdir -p "$HOME/.config/xfce4"
-HELPERS_RC="$HOME/.config/xfce4/helpers.rc"
-touch "$HELPERS_RC"
-sed -i '/^FileManager=/d' "$HELPERS_RC"
-echo "FileManager=filetree" >> "$HELPERS_RC"
+touch "$HOME/.config/xfce4/helpers.rc"
+sed -i '/^FileManager=/d' "$HOME/.config/xfce4/helpers.rc"
+echo "FileManager=filetree" >> "$HOME/.config/xfce4/helpers.rc"
 ok "helpers.rc: FileManager=filetree"
 
-DESKTOP="$HOME/.local/share/applications/filetree.desktop"
+# .desktop
 mkdir -p "$HOME/.local/share/applications"
 printf '[Desktop Entry]\nVersion=1.0\nName=FileTree\nGenericName=File Manager\nComment=Custom file manager\nExec=%s %%U\nIcon=system-file-manager\nTerminal=false\nType=Application\nCategories=System;FileManager;\nMimeType=inode/directory;x-directory/normal;\nStartupNotify=true\nX-XFCE-Binaries=%s\nX-XFCE-Category=FileManager\n' \
-  "$WRAPPER" "$WRAPPER" > "$DESKTOP"
+  "$WRAPPER" "$WRAPPER" > "$HOME/.local/share/applications/filetree.desktop"
 ok ".desktop created"
 
-MIMEAPPS="$HOME/.config/mimeapps.list"
-touch "$MIMEAPPS"
-sed -i '/^inode\/directory=/d;/^x-directory\/normal=/d' "$MIMEAPPS"
-grep -q '^\[Default Applications\]' "$MIMEAPPS" || echo '[Default Applications]' >> "$MIMEAPPS"
-sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop' "$MIMEAPPS"
-grep -q '^\[Added Associations\]' "$MIMEAPPS" 2>/dev/null || printf '\n[Added Associations]\n' >> "$MIMEAPPS"
-sed -i '/^inode\/directory=filetree/d;/^x-directory\/normal=filetree/d' "$MIMEAPPS"
-sed -i '/^\[Added Associations\]/a inode\/directory=filetree.desktop;\nx-directory\/normal=filetree.desktop;' "$MIMEAPPS"
+# mimeapps.list
+touch "$HOME/.config/mimeapps.list"
+sed -i '/^inode\/directory=/d;/^x-directory\/normal=/d' "$HOME/.config/mimeapps.list"
+grep -q '^\[Default Applications\]' "$HOME/.config/mimeapps.list" || echo '[Default Applications]' >> "$HOME/.config/mimeapps.list"
+sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop' "$HOME/.config/mimeapps.list"
+grep -q '^\[Added Associations\]' "$HOME/.config/mimeapps.list" 2>/dev/null || printf '\n[Added Associations]\n' >> "$HOME/.config/mimeapps.list"
+sed -i '/^inode\/directory=filetree/d;/^x-directory\/normal=filetree/d' "$HOME/.config/mimeapps.list"
+sed -i '/^\[Added Associations\]/a inode\/directory=filetree.desktop;\nx-directory\/normal=filetree.desktop;' "$HOME/.config/mimeapps.list"
 ok "mimeapps.list updated"
 
 command -v xdg-mime &>/dev/null && xdg-mime default filetree.desktop inode/directory 2>/dev/null && ok "xdg-mime updated" || true
 command -v gio &>/dev/null && gio mime inode/directory filetree.desktop 2>/dev/null && ok "gio mime updated" || true
 
+# Block Thunar autostart
 mkdir -p "$HOME/.config/autostart"
-printf '[Desktop Entry]\nType=Application\nName=Thunar\nHidden=true\nX-GNOME-Autostart-enabled=false\n' \
-  > "$HOME/.config/autostart/thunar.desktop"
+printf '[Desktop Entry]\nType=Application\nName=Thunar\nHidden=true\nX-GNOME-Autostart-enabled=false\n' > "$HOME/.config/autostart/thunar.desktop"
 for f in /etc/xdg/autostart/thunar*.desktop; do
   [ -f "$f" ] || continue
   base=$(basename "$f")
-  cp "$f" "$HOME/.config/autostart/$base" 2>/dev/null
+  cp "$f" "$HOME/.config/autostart/$base" 2>/dev/null || true
   echo "Hidden=true" >> "$HOME/.config/autostart/$base"
 done
 ok "Thunar autostart blocked"
@@ -195,12 +207,15 @@ export PATH="$HOME/.local/bin:$PATH"
 
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 xfdesktop --reload 2>/dev/null || true
-ok "Registered as default file manager"
+
+ok "Registration complete"
 
 log "Launching FileTree..."
 echo ""
 echo "========================================"
-echo "  FileTree launched! Ctrl+C to stop."
+echo "  FileTree is running! Ctrl+C to stop."
+echo "  After first run: logout and login"
+echo "  to apply as default file manager."
 echo "========================================"
 echo ""
 export DISPLAY="${DISPLAY:-:0}"
