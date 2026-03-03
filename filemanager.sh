@@ -57,6 +57,7 @@ cat > "$DIR/package.json" << 'EOF'
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.0",
+    "electron": "^28.0.0",
     "vite": "^5.0.0"
   }
 }
@@ -350,26 +351,26 @@ APPEOF
 
 ok "Файлы проекта созданы"
 
-# ─── 3. Electron через apt (не качаем бинарник через npm) ────────────
-log "Установка Electron через apt..."
-if ! command -v electron &>/dev/null; then
-  sudo apt-get install -y electron || fail "Не удалось установить electron через apt"
-fi
-ELECTRON_BIN=$(command -v electron)
-ok "Electron: $ELECTRON_BIN"
-
-# ─── 4. npm install (только React + Vite, легковесно) ────────────────
-log "Установка JS зависимостей..."
+# ─── 3. npm install (с зеркалом и таймаутом) ─────────────────────────
+log "Установка зависимостей..."
 cd "$DIR"
-npm install --prefer-offline 2>&1 | tail -5 || fail "npm install завершился с ошибкой"
+
+# Зеркало для Electron (решает проблему обрыва загрузки бинарника)
+export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+export npm_config_fetch_timeout=300000
+export npm_config_fetch_retries=5
+
+npm install 2>&1 | tail -5 || fail "npm install завершился с ошибкой"
 ok "Зависимости установлены"
 
-# ─── 5. Сборка React → dist ──────────────────────────────────────────
+ELECTRON_BIN="$DIR/node_modules/.bin/electron"
+
+# ─── 4. Сборка React → dist ──────────────────────────────────────────
 log "Сборка интерфейса..."
 npx vite build --logLevel warn || fail "Сборка vite завершилась с ошибкой"
 ok "Интерфейс собран"
 
-# ─── 6. Запуск ───────────────────────────────────────────────────────
+# ─── 5. Запуск ───────────────────────────────────────────────────────
 log "Запуск FileTree..."
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
