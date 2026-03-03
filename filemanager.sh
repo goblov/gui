@@ -383,4 +383,4 @@ echo -e "${CYAN}  Ctrl+C — закрыть из терминала${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-"$ELECTRON_BIN" .
+"$ELECTRON_BIN" . --no-sandbox
