@@ -14,22 +14,6 @@ warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
 fail() { echo -e "${RED}✗ $1${NC}"; exit 1; }
 
 DIR="$HOME/.filetree"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# ─── 0. Прокси ───────────────────────────────────────────────────────
-if [ -f "$SCRIPT_DIR/proxy.sh" ]; then
-  log "Применяю прокси из proxy.sh..."
-  source "$SCRIPT_DIR/proxy.sh"
-  ok "Прокси: ${http_proxy:-${HTTP_PROXY:-не задан}}"
-fi
-
-# Передаём прокси в npm если переменные заданы
-PROXY_URL="${http_proxy:-${HTTP_PROXY:-}}"
-if [ -n "$PROXY_URL" ]; then
-  npm config set proxy "$PROXY_URL"
-  npm config set https-proxy "$PROXY_URL"
-  ok "npm прокси настроен: $PROXY_URL"
-fi
 
 # ─── 1. Node.js ──────────────────────────────────────────────────────
 log "Проверка Node.js..."
