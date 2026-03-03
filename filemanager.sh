@@ -1,8 +1,7 @@
 #!/bin/bash
 
-set -e
+set -eo pipefail
 
-# ─── Цвета ───────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -15,6 +14,22 @@ warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
 fail() { echo -e "${RED}✗ $1${NC}"; exit 1; }
 
 DIR="$HOME/.filetree"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ─── 0. Прокси ───────────────────────────────────────────────────────
+if [ -f "$SCRIPT_DIR/proxy.sh" ]; then
+  log "Применяю прокси из proxy.sh..."
+  source "$SCRIPT_DIR/proxy.sh"
+  ok "Прокси: ${http_proxy:-${HTTP_PROXY:-не задан}}"
+fi
+
+# Передаём прокси в npm если переменные заданы
+PROXY_URL="${http_proxy:-${HTTP_PROXY:-}}"
+if [ -n "$PROXY_URL" ]; then
+  npm config set proxy "$PROXY_URL"
+  npm config set https-proxy "$PROXY_URL"
+  ok "npm прокси настроен: $PROXY_URL"
+fi
 
 # ─── 1. Node.js ──────────────────────────────────────────────────────
 log "Проверка Node.js..."
@@ -351,23 +366,28 @@ APPEOF
 
 ok "Файлы проекта созданы"
 
-# ─── 3. npm install (с зеркалом и таймаутом) ─────────────────────────
+# ─── 3. npm install ──────────────────────────────────────────────────
 log "Установка зависимостей..."
 cd "$DIR"
 
-# Зеркало для Electron (решает проблему обрыва загрузки бинарника)
 export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
 export npm_config_fetch_timeout=300000
 export npm_config_fetch_retries=5
 
-npm install 2>&1 | tail -5 || fail "npm install завершился с ошибкой"
+# Без pipe — иначе bash не видит код ошибки npm
+if ! npm install; then
+  fail "npm install завершился с ошибкой"
+fi
 ok "Зависимости установлены"
 
 ELECTRON_BIN="$DIR/node_modules/.bin/electron"
+VITE_BIN="$DIR/node_modules/.bin/vite"
 
 # ─── 4. Сборка React → dist ──────────────────────────────────────────
 log "Сборка интерфейса..."
-npx vite build --logLevel warn || fail "Сборка vite завершилась с ошибкой"
+if ! "$VITE_BIN" build --logLevel warn; then
+  fail "Сборка vite завершилась с ошибкой"
+fi
 ok "Интерфейс собран"
 
 # ─── 5. Запуск ───────────────────────────────────────────────────────
