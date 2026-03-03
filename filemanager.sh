@@ -213,14 +213,15 @@ fi
 # ─── 7. Регистрация как файловый менеджер ────────────────────────────
 
 # Wrapper-скрипт в PATH — exo проверяет что бинарник существует
-cat > /usr/local/bin/filetree << 'WEOF'
+mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/filetree" << 'WEOF'
 #!/bin/bash
 ELECTRON_BIN="$HOME/.filetree/node_modules/.bin/electron"
 DIR="$HOME/.filetree"
 export DISPLAY="${DISPLAY:-:0}"
 exec "$ELECTRON_BIN" "$DIR" --no-sandbox "$@"
 WEOF
-chmod +x /usr/local/bin/filetree
+chmod +x "$HOME/.local/bin/filetree"
 
 DESKTOP_FILE="$HOME/.local/share/applications/filetree.desktop"
 mkdir -p "$HOME/.local/share/applications"
@@ -230,14 +231,14 @@ Version=1.0
 Name=FileTree
 GenericName=File Manager
 Comment=Custom file manager
-Exec=filetree %U
+Exec=$HOME/.local/bin/filetree %U
 Icon=system-file-manager
 Terminal=false
 Type=Application
 Categories=System;FileManager;
 MimeType=inode/directory;x-directory/normal;
 StartupNotify=true
-X-XFCE-Binaries=filetree
+X-XFCE-Binaries=$HOME/.local/bin/filetree
 X-XFCE-Category=FileManager
 DEOF
 
@@ -264,6 +265,10 @@ fi
 pkill -f "Thunar" 2>/dev/null || true
 xfdesktop --reload 2>/dev/null || true
 sleep 1
+
+# Добавить ~/.local/bin в PATH если ещё нет
+grep -q 'HOME/.local/bin' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+export PATH="$HOME/.local/bin:$PATH"
 
 ok "Зарегистрирован как файловый менеджер по умолчанию"
 
