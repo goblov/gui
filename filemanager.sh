@@ -210,6 +210,31 @@ export PATH="$HOME/.local/bin:$PATH"
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 xfdesktop --reload 2>/dev/null || true
 
+# Copy wrapper to /usr/local/bin so XFCE finds it regardless of PATH
+if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+  sudo cp "$WRAPPER" /usr/local/bin/filetree
+  sudo cp "$THUNAR_WRAPPER" /usr/local/bin/thunar
+  sudo chmod +x /usr/local/bin/filetree /usr/local/bin/thunar
+  ok "Wrappers copied to /usr/local/bin"
+elif [ "$(id -u)" = "0" ]; then
+  cp "$WRAPPER" /usr/local/bin/filetree
+  cp "$THUNAR_WRAPPER" /usr/local/bin/thunar
+  chmod +x /usr/local/bin/filetree /usr/local/bin/thunar
+  ok "Wrappers copied to /usr/local/bin"
+fi
+
+# Also copy XFCE helper to system-wide location
+SYSTEM_HELPERS="/usr/local/share/xfce4/helpers"
+if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+  sudo mkdir -p "$SYSTEM_HELPERS"
+  sudo cp "$HOME/.local/share/xfce4/helpers/filetree.desktop" "$SYSTEM_HELPERS/filetree.desktop"
+  ok "XFCE helper copied to $SYSTEM_HELPERS"
+elif [ "$(id -u)" = "0" ]; then
+  mkdir -p "$SYSTEM_HELPERS"
+  cp "$HOME/.local/share/xfce4/helpers/filetree.desktop" "$SYSTEM_HELPERS/filetree.desktop"
+  ok "XFCE helper copied to $SYSTEM_HELPERS"
+fi
+
 ok "Registration complete"
 
 log "Launching FileTree..."
