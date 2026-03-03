@@ -210,7 +210,28 @@ else
   ok "Интерфейс собран — пропускаю"
 fi
 
-# ─── 6. Запуск ───────────────────────────────────────────────────────
+# ─── 7. Регистрация как файловый менеджер ────────────────────────────
+DESKTOP_FILE="$HOME/.local/share/applications/filetree.desktop"
+mkdir -p "$HOME/.local/share/applications"
+cat > "$DESKTOP_FILE" << EOF
+[Desktop Entry]
+Name=FileTree
+Comment=Custom file manager
+Exec=$ELECTRON_BIN $DIR --no-sandbox %U
+Icon=system-file-manager
+Terminal=false
+Type=Application
+Categories=System;FileManager;
+MimeType=inode/directory;
+StartupNotify=true
+EOF
+
+# Назначаем дефолтным для папок
+xdg-mime default filetree.desktop inode/directory
+update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+ok "Зарегистрирован как файловый менеджер по умолчанию"
+
+# ─── 8. Запуск ───────────────────────────────────────────────────────
 log "Запуск FileTree..."
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
