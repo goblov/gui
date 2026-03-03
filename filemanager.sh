@@ -383,4 +383,18 @@ echo -e "${CYAN}  Ctrl+C — закрыть из терминала${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
+# Определяем DISPLAY если не задан (нужно при запуске от root)
+if [ -z "$DISPLAY" ]; then
+  export DISPLAY=:0
+fi
+
+# Определяем XAUTHORITY для доступа к X-серверу
+if [ -z "$XAUTHORITY" ]; then
+  # Ищем .Xauthority у залогиненного пользователя
+  REAL_USER=$(who | awk 'NR==1{print $1}')
+  if [ -n "$REAL_USER" ]; then
+    export XAUTHORITY="/home/$REAL_USER/.Xauthority"
+  fi
+fi
+
 "$ELECTRON_BIN" . --no-sandbox
