@@ -229,13 +229,24 @@ EOF
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 xdg-mime default filetree.desktop inode/directory 2>/dev/null || true
 
-# XFCE использует свой канал настроек
-xfconf-query -c xfce4-mime-helper -p /helpers/FileManager \
-  --create -t string -s filetree.desktop 2>/dev/null || \
-xfconf-query -c xfce4-mime-helper -p /helpers/FileManager \
-  -t string -s filetree.desktop 2>/dev/null || true
+# XFCE читает дефолтные приложения из helpers.rc
+mkdir -p "$HOME/.config/xfce4"
+HELPERS_RC="$HOME/.config/xfce4/helpers.rc"
+if [ -f "$HELPERS_RC" ]; then
+  # Заменяем существующую строку FileManager
+  sed -i 's/^FileManager=.*/FileManager=filetree/' "$HELPERS_RC"
+  # Если строки не было — добавляем
+  grep -q "^FileManager=" "$HELPERS_RC" || echo "FileManager=filetree" >> "$HELPERS_RC"
+else
+  echo "FileManager=filetree" > "$HELPERS_RC"
+fi
 
 ok "Зарегистрирован как файловый менеджер по умолчанию"
+
+# Перезапускаем xfce-helper daemon чтобы изменения применились
+pkill -f xfce4-mime-helper 2>/dev/null || true
+pkill -f Thunar 2>/dev/null || true
+sleep 1
 
 # ─── 8. Запуск ───────────────────────────────────────────────────────
 log "Запуск FileTree..."
