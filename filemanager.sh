@@ -1,381 +1,100 @@
 #!/bin/bash
-set -eo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[1;33m'; NC='\033[0m'
-log()  { echo -e "${CYAN}▶ $1${NC}"; }
 ok()   { echo -e "${GREEN}✓ $1${NC}"; }
+log()  { echo -e "${CYAN}▶ $1${NC}"; }
 warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
-fail() { echo -e "${RED}✗ $1${NC}"; exit 1; }
 
-DIR="$HOME/.filetree"
-ELECTRON_BIN="$DIR/node_modules/.bin/electron"
-VITE_BIN="$DIR/node_modules/.bin/vite"
 WRAPPER="$HOME/.local/bin/filetree"
-DESKTOP_USER="$HOME/.local/share/applications/filetree.desktop"
-DESKTOP_SYSTEM="/usr/share/applications/filetree.desktop"
 
-# ─── Проверка и установка Node.js ────────────────────────────────────
-log "Проверка Node.js..."
-if ! command -v node &>/dev/null; then
-  sudo apt-get update -qq && sudo apt-get install -y nodejs npm || fail "Не удалось установить Node.js"
-fi
-ok "Node.js $(node --version)"
-
-# ─── Создание проекта ────────────────────────────────────────────────
-if [ ! -f "$DIR/package.json" ]; then
-  log "Создание проекта..."
-  mkdir -p "$DIR/src"
-
-  cat > "$DIR/package.json" << 'EOF'
-{"name":"filetree","version":"1.0.0","main":"main.js","dependencies":{"react":"^18.2.0","react-dom":"^18.2.0"},"devDependencies":{"@vitejs/plugin-react":"^4.0.0","vite":"^5.0.0"}}
-EOF
-
-  cat > "$DIR/vite.config.js" << 'EOF'
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-export default defineConfig({ plugins: [react()], base: "./" });
-EOF
-
-  cat > "$DIR/index.html" << 'EOF'
-<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>*{margin:0;padding:0;box-sizing:border-box}body{overflow:hidden;background:#1e1e2e}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#ffffff20;border-radius:2px}</style></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>
-EOF
-
-  cat > "$DIR/main.js" << 'EOF'
-const{app,BrowserWindow,ipcMain,shell}=require("electron"),path=require("path"),fs=require("fs"),os=require("os");
-function createWindow(){const w=new BrowserWindow({width:380,height:700,minWidth:280,minHeight:400,frame:false,backgroundColor:"#1e1e2e",webPreferences:{preload:path.join(__dirname,"preload.js"),contextIsolation:true,nodeIntegration:false}});w.loadFile(path.join(__dirname,"dist","index.html"));}
-ipcMain.handle("fs:readdir",(_,p)=>{try{return fs.readdirSync(p,{withFileTypes:true}).map(e=>({name:e.name,type:e.isDirectory()?"folder":"file",path:path.join(p,e.name)}))}catch{return[]}});
-ipcMain.handle("fs:homedir",()=>os.homedir());
-ipcMain.handle("fs:open",(_,p)=>shell.openPath(p));
-ipcMain.on("win:minimize",e=>BrowserWindow.fromWebContents(e.sender)?.minimize());
-ipcMain.on("win:maximize",e=>{const w=BrowserWindow.fromWebContents(e.sender);w?.isMaximized()?w.unmaximize():w?.maximize()});
-ipcMain.on("win:close",e=>BrowserWindow.fromWebContents(e.sender)?.close());
-app.whenReady().then(createWindow);
-app.on("window-all-closed",()=>app.quit());
-EOF
-
-  cat > "$DIR/preload.js" << 'EOF'
-const{contextBridge,ipcRenderer}=require("electron");
-contextBridge.exposeInMainWorld("electronAPI",{readdir:p=>ipcRenderer.invoke("fs:readdir",p),homedir:()=>ipcRenderer.invoke("fs:homedir"),openFile:p=>ipcRenderer.invoke("fs:open",p),minimize:()=>ipcRenderer.send("win:minimize"),maximize:()=>ipcRenderer.send("win:maximize"),close:()=>ipcRenderer.send("win:close")});
-EOF
-
-  cat > "$DIR/src/main.jsx" << 'EOF'
-import React from "react";import ReactDOM from "react-dom/client";import App from "./App.jsx";
-ReactDOM.createRoot(document.getElementById("root")).render(<React.StrictMode><App/></React.StrictMode>);
-EOF
-  ok "Файлы проекта созданы"
-else
-  ok "Проект существует — пропускаю"
+if [ ! -f "$WRAPPER" ]; then
+  echo -e "${RED}✗ Wrapper не найден: $WRAPPER${NC}"
+  echo "  Сначала запусти основной скрипт filemanager.sh"
+  exit 1
 fi
 
-python3 - << 'PYEOF'
-import os
-src = os.path.expanduser("~/.filetree/src")
-os.makedirs(src, exist_ok=True)
-app_path = os.path.join(src, "App.jsx")
-if os.path.exists(app_path):
-    print("App.jsx exists — skip")
-else:
-    with open(app_path, "w") as f:
-        f.write("""import { useState, useEffect, useCallback } from "react";
-const DEFAULT_COLOR = "#b39ddb";
-const api = window.electronAPI;
-function FolderIcon({ color, open }) {
-  return (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-    <path d="M2 6C2 4.9 2.9 4 4 4H9.17C9.7 4 10.21 4.21 10.59 4.59L12 6H20C21.1 6 22 6.9 22 8V18C22 19.1 21.1 20 20 20H4C2.9 20 2 19.1 2 18V6Z"
-      fill={open ? color+"33" : color+"22"} stroke={color} strokeWidth="1.5" strokeLinejoin="round"/>
-    {open && <path d="M2 10H22" stroke={color} strokeWidth="1.2" strokeOpacity="0.5"/>}
-  </svg>);
-}
-function FileIcon() {
-  return (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-    <path d="M13 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V9L13 2Z" fill="#ffffff0d" stroke="#666" strokeWidth="1.5" strokeLinejoin="round"/>
-    <path d="M13 2V9H20" stroke="#666" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>);
-}
-function ChevronIcon({ open }) {
-  return (<svg width="9" height="9" viewBox="0 0 10 10" fill="none"
-    style={{ flexShrink:0, transition:"transform 0.15s", transform: open?"rotate(90deg)":"rotate(0deg)" }}>
-    <path d="M3 2L7 5L3 8" stroke="#666" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>);
-}
-function TreeNode({ node, depth, color, onNavigate }) {
-  const [open, setOpen] = useState(false);
-  const [children, setChildren] = useState(null);
-  const isFolder = node.type === "folder";
-  const handleClick = useCallback(async () => {
-    if (!isFolder) { api?.openFile(node.path); return; }
-    if (!open && children === null) {
-      const items = await api?.readdir(node.path) ?? [];
-      setChildren([...items].sort((a,b) => a.type===b.type ? a.name.localeCompare(b.name) : a.type==="folder"?-1:1));
-    }
-    setOpen(o => !o);
-  }, [isFolder, open, children, node.path]);
-  return (<div>
-    <div style={{ display:"flex", alignItems:"center", gap:"5px", padding:\`3px 8px 3px \${8+depth*14}px\`,
-        cursor:"pointer", borderRadius:"4px", userSelect:"none", fontSize:"12.5px", color:"#ccc",
-        transition:"background 0.1s", WebkitAppRegion:"no-drag" }}
-      onClick={handleClick}
-      onDoubleClick={() => isFolder && onNavigate?.(node.path)}
-      onMouseEnter={e => e.currentTarget.style.background="#ffffff0d"}
-      onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-      {isFolder ? (<><ChevronIcon open={open}/><FolderIcon color={color} open={open}/></>)
-                : (<><span style={{width:9}}/><FileIcon/></>)}
-      <span style={{marginLeft:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{node.name}</span>
-    </div>
-    {isFolder && open && children?.map((child,i) => (
-      <TreeNode key={i} node={child} depth={depth+1} color={color} onNavigate={onNavigate}/>
-    ))}
-  </div>);
-}
-function TBtn({ title, onClick, children }) {
-  return (<button title={title} onClick={onClick}
-    style={{ background:"transparent", border:"none", cursor:"pointer", padding:"4px", display:"flex",
-      alignItems:"center", color:"#666", borderRadius:"3px", transition:"color 0.1s", WebkitAppRegion:"no-drag" }}
-    onMouseEnter={e => e.currentTarget.style.color="#bbb"}
-    onMouseLeave={e => e.currentTarget.style.color="#666"}>{children}</button>);
-}
-export default function App() {
-  const [color, setColor] = useState(DEFAULT_COLOR);
-  const [currentPath, setCurrentPath] = useState("~");
-  const [tree, setTree] = useState([]);
-  const [search, setSearch] = useState("");
-  const [showSearch, setShowSearch] = useState(false);
-  const loadDir = useCallback(async (dirPath) => {
-    const items = await api?.readdir(dirPath) ?? [];
-    setTree([...items].sort((a,b) => a.type===b.type ? a.name.localeCompare(b.name) : a.type==="folder"?-1:1));
-    setCurrentPath(dirPath);
-  }, []);
-  useEffect(() => { (async () => { const home = await api?.homedir() ?? "/home"; loadDir(home); })(); }, []);
-  const goUp = () => loadDir(currentPath.split("/").slice(0,-1).join("/")||"/");
-  const filtered = search ? tree.filter(n => n.name.toLowerCase().includes(search.toLowerCase())) : tree;
-  const displayPath = currentPath.replace(/^\\/home\\/[^/]+/, "~");
-  return (
-    <div style={{ background:"#1e1e2e", height:"100vh", fontFamily:"'JetBrains Mono','Fira Mono',monospace", display:"flex", flexDirection:"column", overflow:"hidden" }}>
-      <div style={{ background:"#13131f", borderBottom:"1px solid #ffffff0f", padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"space-between", WebkitAppRegion:"drag", flexShrink:0 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"2px" }}>
-          <TBtn title="Вверх" onClick={goUp}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 15 12 9 6 15"/></svg></TBtn>
-          <TBtn title="Обновить" onClick={() => loadDir(currentPath)}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/></svg></TBtn>
-          <TBtn title="Поиск" onClick={() => setShowSearch(s => !s)}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></TBtn>
-        </div>
-        <span style={{ color:"#555", fontSize:"11px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"140px" }}>{displayPath}</span>
-        <div style={{ display:"flex", alignItems:"center", gap:"4px" }}>
-          <input type="color" value={color} onChange={e => setColor(e.target.value)} title="Цвет папок" style={{ width:"14px", height:"14px", borderRadius:"50%", border:"none", cursor:"pointer", padding:0, WebkitAppRegion:"no-drag" }}/>
-          <div style={{ width:"1px", height:"12px", background:"#ffffff10", margin:"0 3px" }}/>
-          <TBtn title="Свернуть" onClick={() => api?.minimize()}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg></TBtn>
-          <TBtn title="Развернуть" onClick={() => api?.maximize()}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></TBtn>
-          <TBtn title="Закрыть" onClick={() => api?.close()}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></TBtn>
-        </div>
-      </div>
-      {showSearch && (<div style={{ background:"#13131f", borderBottom:"1px solid #ffffff0f", padding:"5px 10px" }}>
-        <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск..."
-          style={{ width:"100%", background:"#ffffff08", border:"1px solid #ffffff12", borderRadius:"4px", color:"#ccc", fontSize:"12px", padding:"4px 8px", outline:"none", fontFamily:"inherit" }}/>
-      </div>)}
-      <div style={{ overflowY:"auto", flex:1, padding:"4px 0" }}>
-        {filtered.length === 0 && <div style={{ color:"#444", fontSize:"12px", padding:"16px", textAlign:"center" }}>{search ? "Ничего не найдено" : "Папка пуста"}</div>}
-        {filtered.map((node,i) => (<TreeNode key={i} node={node} depth={0} color={color} onNavigate={loadDir}/>))}
-      </div>
-    </div>
-  );
-}
-""")
-    print("App.jsx written")
-PYEOF
+# ─── 1. XFCE Helper-файл — главный механизм XFCE ─────────────────────
+# XFCE игнорирует xdg-mime и читает менеджер файлов только отсюда
+log "Создание XFCE helper-файла..."
+HELPERS_DIR="$HOME/.local/share/xfce4/helpers"
+mkdir -p "$HELPERS_DIR"
 
-# ─── npm install ─────────────────────────────────────────────────────
-if [ ! -f "$VITE_BIN" ]; then
-  log "Установка React + Vite..."
-  cd "$DIR"
-  npm config set registry https://registry.npmmirror.com
-  npm install || fail "npm install завершился с ошибкой"
-  ok "React + Vite установлены"
-else
-  ok "React + Vite — пропускаю"
-fi
-
-if [ ! -f "$ELECTRON_BIN" ]; then
-  log "Установка Electron..."
-  cd "$DIR"
-  export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
-  npm install electron@28 --save-dev || fail "Не удалось установить Electron"
-  ok "Electron установлен"
-else
-  ok "Electron — пропускаю"
-fi
-
-if [ ! -d "$DIR/dist" ]; then
-  log "Сборка интерфейса..."
-  cd "$DIR"
-  "$VITE_BIN" build --logLevel warn || fail "Сборка завершилась с ошибкой"
-  ok "Интерфейс собран"
-else
-  ok "Интерфейс собран — пропускаю"
-fi
-
-# ═════════════════════════════════════════════════════════════════════
-# БЛОК СИСТЕМНОЙ РЕГИСТРАЦИИ
-# ═════════════════════════════════════════════════════════════════════
-
-log "Регистрация FileTree как менеджера файлов по умолчанию..."
-
-# ─── 1. Wrapper-скрипт ───────────────────────────────────────────────
-mkdir -p "$HOME/.local/bin"
-cat > "$WRAPPER" << EOF
-#!/bin/bash
-export DISPLAY="\${DISPLAY:-:0}"
-# Если передан аргумент-путь — открыть его, иначе — домашнюю папку
-OPEN_PATH="\${1:-\$HOME}"
-exec "$ELECTRON_BIN" "$DIR" --no-sandbox "\$OPEN_PATH"
-EOF
-chmod +x "$WRAPPER"
-ok "Wrapper создан: $WRAPPER"
-
-# ─── 2. .desktop — пользовательский уровень ──────────────────────────
-mkdir -p "$HOME/.local/share/applications"
-cat > "$DESKTOP_USER" << EOF
+cat > "$HELPERS_DIR/filetree.desktop" << HELPER
 [Desktop Entry]
 Version=1.0
-Name=FileTree
-GenericName=File Manager
-Comment=Custom file manager
-Exec=$WRAPPER %U
+Encoding=UTF-8
+Type=X-XFCE-Helper
+X-XFCE-Helper-Name=FileTree
+X-XFCE-Helper-Category=FileManager
+X-XFCE-Binaries=$WRAPPER;
+X-XFCE-Commands=$WRAPPER;
+X-XFCE-CommandsWithParameter=$WRAPPER "%s";
 Icon=system-file-manager
-Terminal=false
-Type=Application
-Categories=System;FileManager;
-MimeType=inode/directory;x-directory/normal;application/x-gnome-saved-search;
-StartupNotify=true
-X-XFCE-Binaries=$WRAPPER
-X-XFCE-Category=FileManager
-EOF
-ok ".desktop создан (пользователь): $DESKTOP_USER"
+Name=FileTree
+Comment=Custom file manager
+HELPER
+ok "XFCE helper: $HELPERS_DIR/filetree.desktop"
 
-# ─── 3. .desktop — системный уровень (требует sudo) ──────────────────
-if sudo -n true 2>/dev/null; then
-  sudo cp "$DESKTOP_USER" "$DESKTOP_SYSTEM"
-  sudo chown root:root "$DESKTOP_SYSTEM"
-  sudo chmod 644 "$DESKTOP_SYSTEM"
-  ok ".desktop установлен системно: $DESKTOP_SYSTEM"
-  sudo update-desktop-database /usr/share/applications 2>/dev/null || true
-else
-  warn "Нет sudo без пароля — системный .desktop пропущен (только пользовательский)"
-fi
-update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-
-# ─── 4. xdg-mime — назначение MIME-типов ─────────────────────────────
-if command -v xdg-mime &>/dev/null; then
-  xdg-mime default filetree.desktop inode/directory
-  xdg-mime default filetree.desktop x-directory/normal
-  ok "xdg-mime: inode/directory → filetree"
-else
-  warn "xdg-mime не найден — пропускаю"
-fi
-
-# ─── 5. mimeapps.list — пользовательский уровень ─────────────────────
-MIMEAPPS_USER="$HOME/.config/mimeapps.list"
-mkdir -p "$HOME/.config"
-[ -f "$MIMEAPPS_USER" ] || echo "[Default Applications]" > "$MIMEAPPS_USER"
-grep -q "^\[Default Applications\]" "$MIMEAPPS_USER" || echo "[Default Applications]" >> "$MIMEAPPS_USER"
-
-for mime in "inode/directory" "x-directory/normal" "application/x-gnome-saved-search"; do
-  sed -i "/^${mime//\//\\/}=/d" "$MIMEAPPS_USER"
-done
-sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop\napplication\/x-gnome-saved-search=filetree.desktop' "$MIMEAPPS_USER"
-ok "mimeapps.list обновлён (пользователь)"
-
-# ─── 6. mimeapps.list — системный уровень ────────────────────────────
-MIMEAPPS_SYSTEM="/usr/share/applications/mimeapps.list"
-if sudo -n true 2>/dev/null; then
-  sudo bash -c "
-    [ -f '$MIMEAPPS_SYSTEM' ] || echo '[Default Applications]' > '$MIMEAPPS_SYSTEM'
-    grep -q '^\[Default Applications\]' '$MIMEAPPS_SYSTEM' || echo '[Default Applications]' >> '$MIMEAPPS_SYSTEM'
-    sed -i '/^inode\/directory=/d;/^x-directory\/normal=/d' '$MIMEAPPS_SYSTEM'
-    sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop' '$MIMEAPPS_SYSTEM'
-  "
-  ok "mimeapps.list обновлён (система)"
-else
-  warn "Нет sudo — системный mimeapps.list пропущен"
-fi
-
-# ─── 7. XFCE helpers.rc ──────────────────────────────────────────────
-mkdir -p "$HOME/.config/xfce4"
+# ─── 2. helpers.rc ────────────────────────────────────────────────────
+log "Обновление helpers.rc..."
 HELPERS_RC="$HOME/.config/xfce4/helpers.rc"
-if grep -q "^FileManager=" "$HELPERS_RC" 2>/dev/null; then
-  sed -i 's|^FileManager=.*|FileManager=filetree|' "$HELPERS_RC"
-else
-  echo "FileManager=filetree" >> "$HELPERS_RC"
-fi
-ok "XFCE helpers.rc: FileManager=filetree"
+mkdir -p "$HOME/.config/xfce4"
+[ -f "$HELPERS_RC" ] && sed -i '/^FileManager=/d' "$HELPERS_RC"
+echo "FileManager=filetree" >> "$HELPERS_RC"
+ok "helpers.rc: FileManager=filetree"
 
-# ─── 8. XFCE xfce4-mime-settings (xfconf) ────────────────────────────
+# ─── 3. xfconf-query ─────────────────────────────────────────────────
+log "Запись в xfconf..."
 if command -v xfconf-query &>/dev/null; then
-  xfconf-query -c xfce4-mime-settings -p /default-file-manager -s filetree 2>/dev/null \
-    || xfconf-query -c xfce4-mime-settings -p /default-file-manager -n -t string -s filetree 2>/dev/null \
-    || warn "xfconf-query: не удалось записать — возможно, канал не существует"
-  ok "xfconf: default-file-manager=filetree"
+  xfconf-query -c xfce4-mime-settings -p /FileManager -n -t string -s "$WRAPPER" 2>/dev/null \
+    || xfconf-query -c xfce4-mime-settings -p /FileManager -s "$WRAPPER" 2>/dev/null || true
+  xfconf-query -c xfce4-session -p /general/FileManager -n -t string -s "$WRAPPER" 2>/dev/null \
+    || xfconf-query -c xfce4-session -p /general/FileManager -s "$WRAPPER" 2>/dev/null || true
+  ok "xfconf записан"
 else
-  warn "xfconf-query не найден — xfce4-mime-settings пропущен"
+  warn "xfconf-query не найден"
 fi
 
-# ─── 9. Autostart — запуск демона при входе ──────────────────────────
-AUTOSTART_DIR="$HOME/.config/autostart"
-mkdir -p "$AUTOSTART_DIR"
-cat > "$AUTOSTART_DIR/filetree-daemon.desktop" << EOF
-[Desktop Entry]
-Type=Application
-Name=FileTree Daemon
-Comment=Pre-warm FileTree file manager
-Exec=$WRAPPER --daemon
-Hidden=false
-NoDisplay=true
-X-GNOME-Autostart-enabled=true
-X-XFCE-Autostart-Override=true
-EOF
-ok "Autostart создан: $AUTOSTART_DIR/filetree-daemon.desktop"
+# ─── 4. Проверка exo-open ─────────────────────────────────────────────
+if command -v exo-open &>/dev/null; then
+  log "Тест exo-open..."
+  RESULT=$(exo-open --query FileManager 2>/dev/null || echo "")
+  if echo "$RESULT" | grep -qi "filetree"; then
+    ok "exo-open видит filetree"
+  else
+    warn "exo-open показывает: $RESULT  (изменится после re-login)"
+  fi
+fi
 
-# ─── 10. PATH в .bashrc, .profile, .xprofile ─────────────────────────
-PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
-for rcfile in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.xprofile"; do
-  grep -qF 'local/bin' "$rcfile" 2>/dev/null || echo "$PATH_LINE" >> "$rcfile"
-done
-export PATH="$HOME/.local/bin:$PATH"
-ok "PATH обновлён в .bashrc / .profile / .xprofile"
+# ─── 5. mimeapps.list ────────────────────────────────────────────────
+log "Перезапись mimeapps.list..."
+MIMEAPPS="$HOME/.config/mimeapps.list"
+sed -i '/^inode\/directory=/d;/^x-directory\/normal=/d;/^x-directory\/gnome-default-handler=/d' "$MIMEAPPS" 2>/dev/null || true
+grep -q "^\[Default Applications\]" "$MIMEAPPS" 2>/dev/null || echo "[Default Applications]" > "$MIMEAPPS"
+sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop' "$MIMEAPPS"
+grep -q "^\[Added Associations\]" "$MIMEAPPS" 2>/dev/null || printf '\n[Added Associations]\n' >> "$MIMEAPPS"
+sed -i '/^\[Added Associations\]/a inode\/directory=filetree.desktop;\nx-directory\/normal=filetree.desktop;' "$MIMEAPPS"
+ok "mimeapps.list обновлён"
 
-# ─── 11. Перезапуск XFCE-компонентов ─────────────────────────────────
-log "Применение настроек XFCE..."
-pkill -f "Thunar" 2>/dev/null || true
-pkill -f "thunar" 2>/dev/null || true
+# ─── 6. gio + xdg-mime ───────────────────────────────────────────────
+log "Обновление gio/xdg..."
+command -v gio &>/dev/null && gio mime inode/directory filetree.desktop 2>/dev/null && ok "gio mime обновлён" || true
+command -v xdg-mime &>/dev/null && xdg-mime default filetree.desktop inode/directory 2>/dev/null && ok "xdg-mime обновлён" || true
+
+# ─── 7. Убить Thunar-демон, перезапустить XFCE ───────────────────────
+log "Перезапуск XFCE-компонентов..."
+pkill -f "thunar" 2>/dev/null; pkill -f "Thunar" 2>/dev/null || true
 sleep 0.5
+update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+xfdesktop --reload 2>/dev/null || true
+ok "XFCE перезапущен"
 
-# Перезагрузить базу данных Thunar/XFCE (если установлена)
-if command -v xfce4-terminal &>/dev/null || [ -d "$HOME/.config/xfce4" ]; then
-  xfdesktop --reload 2>/dev/null || true
-fi
-
-# Обновить gio (GLib) кэш иконок и mime-ассоциаций
-if command -v gio &>/dev/null; then
-  gio mime inode/directory filetree.desktop 2>/dev/null || true
-  ok "gio mime: inode/directory → filetree"
-fi
-
-# update-alternatives (системный уровень, если доступен sudo)
-if sudo -n true 2>/dev/null && command -v update-alternatives &>/dev/null; then
-  sudo update-alternatives --install /usr/bin/x-file-manager x-file-manager "$WRAPPER" 100 2>/dev/null || true
-  sudo update-alternatives --set x-file-manager "$WRAPPER" 2>/dev/null \
-    || sudo update-alternatives --auto x-file-manager 2>/dev/null || true
-  ok "update-alternatives: x-file-manager → filetree"
-else
-  warn "update-alternatives пропущен (нет sudo или не установлен)"
-fi
-
-ok "Зарегистрирован как файловый менеджер по умолчанию (системно + пользователь)"
-
-# ─── Запуск ──────────────────────────────────────────────────────────
-log "Запуск FileTree..."
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  FileTree запущен!${NC}"
-echo -e "${CYAN}  Ctrl+C — закрыть из терминала${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}  Готово!${NC}"
 echo ""
-export DISPLAY="${DISPLAY:-:0}"
-cd "$DIR"
-exec "$ELECTRON_BIN" . --no-sandbox
+echo -e "  Проверка: ${CYAN}exo-open --launch FileManager${NC}"
+echo -e "  или дважды кликни на папке на рабочем столе"
+echo ""
+echo -e "${YELLOW}  Если Thunar всё ещё открывается:${NC}"
+echo -e "${YELLOW}  выйди из системы и войди снова (re-login)${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
