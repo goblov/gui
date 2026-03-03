@@ -226,24 +226,40 @@ Type=Application
 Categories=System;FileManager;
 MimeType=inode/directory;
 StartupNotify=true
-X-XFCE-Binaries=electron
+X-XFCE-Binaries=$ELECTRON_BIN
 X-XFCE-Category=FileManager
 EOF
 
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 xdg-mime default filetree.desktop inode/directory 2>/dev/null || true
+xdg-mime default filetree.desktop x-directory/normal 2>/dev/null || true
 
-# Записываем в helpers.rc напрямую
+# helpers.rc — основной конфиг exo для XFCE
 mkdir -p "$HOME/.config/xfce4"
 HELPERS_RC="$HOME/.config/xfce4/helpers.rc"
 if grep -q "^FileManager=" "$HELPERS_RC" 2>/dev/null; then
-  sed -i 's/^FileManager=.*/FileManager=filetree/' "$HELPERS_RC"
+  sed -i 's|^FileManager=.*|FileManager=filetree|' "$HELPERS_RC"
 else
   echo "FileManager=filetree" >> "$HELPERS_RC"
 fi
 
+# mimeapps.list — системный список ассоциаций
+MIMEAPPS="$HOME/.config/mimeapps.list"
+mkdir -p "$HOME/.config"
+if [ ! -f "$MIMEAPPS" ]; then
+  echo "[Default Applications]" > "$MIMEAPPS"
+fi
+if grep -q "inode/directory=" "$MIMEAPPS" 2>/dev/null; then
+  sed -i 's|inode/directory=.*|inode/directory=filetree.desktop|' "$MIMEAPPS"
+else
+  sed -i '/^\[Default Applications\]/a inode/directory=filetree.desktop' "$MIMEAPPS"
+fi
+
+# Убиваем Thunar daemon и exo чтобы сбросить кэш
+pkill -f "Thunar --daemon" 2>/dev/null || true
 pkill -f Thunar 2>/dev/null || true
 sleep 1
+
 ok "Зарегистрирован как файловый менеджер по умолчанию"
 
 # ─── 8. Запуск ───────────────────────────────────────────────────────
