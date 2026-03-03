@@ -57,21 +57,7 @@ cat > "$DIR/package.json" << 'EOF'
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.0",
-    "concurrently": "^8.0.0",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.0.0",
-    "vite": "^5.0.0",
-    "wait-on": "^7.0.0"
-  },
-  "build": {
-    "appId": "com.filetree.app",
-    "productName": "FileTree",
-    "linux": {
-      "target": ["AppImage"],
-      "category": "Utility"
-    },
-    "files": ["dist/**/*", "main.js", "preload.js"],
-    "directories": { "output": "release" }
+    "vite": "^5.0.0"
   }
 }
 EOF
@@ -364,13 +350,26 @@ APPEOF
 
 ok "Файлы проекта созданы"
 
-# ─── 3. npm install ──────────────────────────────────────────────────
-log "Установка зависимостей (может занять 1-2 минуты)..."
+# ─── 3. Electron через apt (не качаем бинарник через npm) ────────────
+log "Установка Electron через apt..."
+if ! command -v electron &>/dev/null; then
+  sudo apt-get install -y electron || fail "Не удалось установить electron через apt"
+fi
+ELECTRON_BIN=$(command -v electron)
+ok "Electron: $ELECTRON_BIN"
+
+# ─── 4. npm install (только React + Vite, легковесно) ────────────────
+log "Установка JS зависимостей..."
 cd "$DIR"
-npm install --silent || fail "npm install завершился с ошибкой"
+npm install --prefer-offline 2>&1 | tail -5 || fail "npm install завершился с ошибкой"
 ok "Зависимости установлены"
 
-# ─── 4. Запуск ───────────────────────────────────────────────────────
+# ─── 5. Сборка React → dist ──────────────────────────────────────────
+log "Сборка интерфейса..."
+npx vite build --logLevel warn || fail "Сборка vite завершилась с ошибкой"
+ok "Интерфейс собран"
+
+# ─── 6. Запуск ───────────────────────────────────────────────────────
 log "Запуск FileTree..."
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -379,5 +378,4 @@ echo -e "${CYAN}  Ctrl+C — закрыть из терминала${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# При повторном запуске пересобирать не нужно — просто стартуем
-NODE_ENV=production npx electron .
+"$ELECTRON_BIN" .
