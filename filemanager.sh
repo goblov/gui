@@ -1,20 +1,26 @@
 #!/bin/bash
 set -eo pipefail
-RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log()  { echo -e "${CYAN}▶ $1${NC}"; }
 ok()   { echo -e "${GREEN}✓ $1${NC}"; }
+warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
 fail() { echo -e "${RED}✗ $1${NC}"; exit 1; }
 
 DIR="$HOME/.filetree"
 ELECTRON_BIN="$DIR/node_modules/.bin/electron"
 VITE_BIN="$DIR/node_modules/.bin/vite"
+WRAPPER="$HOME/.local/bin/filetree"
+DESKTOP_USER="$HOME/.local/share/applications/filetree.desktop"
+DESKTOP_SYSTEM="/usr/share/applications/filetree.desktop"
 
+# ─── Проверка и установка Node.js ────────────────────────────────────
 log "Проверка Node.js..."
 if ! command -v node &>/dev/null; then
   sudo apt-get update -qq && sudo apt-get install -y nodejs npm || fail "Не удалось установить Node.js"
 fi
 ok "Node.js $(node --version)"
 
+# ─── Создание проекта ────────────────────────────────────────────────
 if [ ! -f "$DIR/package.json" ]; then
   log "Создание проекта..."
   mkdir -p "$DIR/src"
@@ -104,7 +110,7 @@ function TreeNode({ node, depth, color, onNavigate }) {
     setOpen(o => !o);
   }, [isFolder, open, children, node.path]);
   return (<div>
-    <div style={{ display:"flex", alignItems:"center", gap:"5px", padding:`3px 8px 3px ${8+depth*14}px`,
+    <div style={{ display:"flex", alignItems:"center", gap:"5px", padding:\`3px 8px 3px \${8+depth*14}px\`,
         cursor:"pointer", borderRadius:"4px", userSelect:"none", fontSize:"12.5px", color:"#ccc",
         transition:"background 0.1s", WebkitAppRegion:"no-drag" }}
       onClick={handleClick}
@@ -174,6 +180,7 @@ export default function App() {
     print("App.jsx written")
 PYEOF
 
+# ─── npm install ─────────────────────────────────────────────────────
 if [ ! -f "$VITE_BIN" ]; then
   log "Установка React + Vite..."
   cd "$DIR"
@@ -203,34 +210,92 @@ else
   ok "Интерфейс собран — пропускаю"
 fi
 
-# ─── Регистрация как файловый менеджер ───────────────────────────────
-WRAPPER="$HOME/.local/bin/filetree"
-mkdir -p "$HOME/.local/bin"
+# ═════════════════════════════════════════════════════════════════════
+# БЛОК СИСТЕМНОЙ РЕГИСТРАЦИИ
+# ═════════════════════════════════════════════════════════════════════
 
-# Wrapper с реальными путями (не $HOME)
+log "Регистрация FileTree как менеджера файлов по умолчанию..."
+
+# ─── 1. Wrapper-скрипт ───────────────────────────────────────────────
+mkdir -p "$HOME/.local/bin"
 cat > "$WRAPPER" << EOF
 #!/bin/bash
 export DISPLAY="\${DISPLAY:-:0}"
-exec "$ELECTRON_BIN" "$DIR" --no-sandbox "\$@"
+# Если передан аргумент-путь — открыть его, иначе — домашнюю папку
+OPEN_PATH="\${1:-\$HOME}"
+exec "$ELECTRON_BIN" "$DIR" --no-sandbox "\$OPEN_PATH"
 EOF
 chmod +x "$WRAPPER"
+ok "Wrapper создан: $WRAPPER"
 
-# .desktop с реальными путями через printf (не heredoc — иначе $HOME не раскрывается)
-DESKTOP="$HOME/.local/share/applications/filetree.desktop"
+# ─── 2. .desktop — пользовательский уровень ──────────────────────────
 mkdir -p "$HOME/.local/share/applications"
-printf '[Desktop Entry]\nVersion=1.0\nName=FileTree\nGenericName=File Manager\nComment=Custom file manager\nExec=%s %%U\nIcon=system-file-manager\nTerminal=false\nType=Application\nCategories=System;FileManager;\nMimeType=inode/directory;x-directory/normal;\nStartupNotify=true\nX-XFCE-Binaries=%s\nX-XFCE-Category=FileManager\n' "$WRAPPER" "$WRAPPER" > "$DESKTOP"
+cat > "$DESKTOP_USER" << EOF
+[Desktop Entry]
+Version=1.0
+Name=FileTree
+GenericName=File Manager
+Comment=Custom file manager
+Exec=$WRAPPER %U
+Icon=system-file-manager
+Terminal=false
+Type=Application
+Categories=System;FileManager;
+MimeType=inode/directory;x-directory/normal;application/x-gnome-saved-search;
+StartupNotify=true
+X-XFCE-Binaries=$WRAPPER
+X-XFCE-Category=FileManager
+EOF
+ok ".desktop создан (пользователь): $DESKTOP_USER"
 
+# ─── 3. .desktop — системный уровень (требует sudo) ──────────────────
+if sudo -n true 2>/dev/null; then
+  sudo cp "$DESKTOP_USER" "$DESKTOP_SYSTEM"
+  sudo chown root:root "$DESKTOP_SYSTEM"
+  sudo chmod 644 "$DESKTOP_SYSTEM"
+  ok ".desktop установлен системно: $DESKTOP_SYSTEM"
+  sudo update-desktop-database /usr/share/applications 2>/dev/null || true
+else
+  warn "Нет sudo без пароля — системный .desktop пропущен (только пользовательский)"
+fi
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 
-# mimeapps.list
-MIMEAPPS="$HOME/.config/mimeapps.list"
-mkdir -p "$HOME/.config"
-grep -q "^\[Default Applications\]" "$MIMEAPPS" 2>/dev/null || echo "[Default Applications]" > "$MIMEAPPS"
-sed -i '/^inode\/directory=/d' "$MIMEAPPS"
-sed -i '/^x-directory\/normal=/d' "$MIMEAPPS"
-sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop' "$MIMEAPPS"
+# ─── 4. xdg-mime — назначение MIME-типов ─────────────────────────────
+if command -v xdg-mime &>/dev/null; then
+  xdg-mime default filetree.desktop inode/directory
+  xdg-mime default filetree.desktop x-directory/normal
+  ok "xdg-mime: inode/directory → filetree"
+else
+  warn "xdg-mime не найден — пропускаю"
+fi
 
-# helpers.rc
+# ─── 5. mimeapps.list — пользовательский уровень ─────────────────────
+MIMEAPPS_USER="$HOME/.config/mimeapps.list"
+mkdir -p "$HOME/.config"
+[ -f "$MIMEAPPS_USER" ] || echo "[Default Applications]" > "$MIMEAPPS_USER"
+grep -q "^\[Default Applications\]" "$MIMEAPPS_USER" || echo "[Default Applications]" >> "$MIMEAPPS_USER"
+
+for mime in "inode/directory" "x-directory/normal" "application/x-gnome-saved-search"; do
+  sed -i "/^${mime//\//\\/}=/d" "$MIMEAPPS_USER"
+done
+sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop\napplication\/x-gnome-saved-search=filetree.desktop' "$MIMEAPPS_USER"
+ok "mimeapps.list обновлён (пользователь)"
+
+# ─── 6. mimeapps.list — системный уровень ────────────────────────────
+MIMEAPPS_SYSTEM="/usr/share/applications/mimeapps.list"
+if sudo -n true 2>/dev/null; then
+  sudo bash -c "
+    [ -f '$MIMEAPPS_SYSTEM' ] || echo '[Default Applications]' > '$MIMEAPPS_SYSTEM'
+    grep -q '^\[Default Applications\]' '$MIMEAPPS_SYSTEM' || echo '[Default Applications]' >> '$MIMEAPPS_SYSTEM'
+    sed -i '/^inode\/directory=/d;/^x-directory\/normal=/d' '$MIMEAPPS_SYSTEM'
+    sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop\nx-directory\/normal=filetree.desktop' '$MIMEAPPS_SYSTEM'
+  "
+  ok "mimeapps.list обновлён (система)"
+else
+  warn "Нет sudo — системный mimeapps.list пропущен"
+fi
+
+# ─── 7. XFCE helpers.rc ──────────────────────────────────────────────
 mkdir -p "$HOME/.config/xfce4"
 HELPERS_RC="$HOME/.config/xfce4/helpers.rc"
 if grep -q "^FileManager=" "$HELPERS_RC" 2>/dev/null; then
@@ -238,15 +303,70 @@ if grep -q "^FileManager=" "$HELPERS_RC" 2>/dev/null; then
 else
   echo "FileManager=filetree" >> "$HELPERS_RC"
 fi
+ok "XFCE helpers.rc: FileManager=filetree"
 
-# Добавить ~/.local/bin в PATH
-grep -q 'local/bin' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+# ─── 8. XFCE xfce4-mime-settings (xfconf) ────────────────────────────
+if command -v xfconf-query &>/dev/null; then
+  xfconf-query -c xfce4-mime-settings -p /default-file-manager -s filetree 2>/dev/null \
+    || xfconf-query -c xfce4-mime-settings -p /default-file-manager -n -t string -s filetree 2>/dev/null \
+    || warn "xfconf-query: не удалось записать — возможно, канал не существует"
+  ok "xfconf: default-file-manager=filetree"
+else
+  warn "xfconf-query не найден — xfce4-mime-settings пропущен"
+fi
+
+# ─── 9. Autostart — запуск демона при входе ──────────────────────────
+AUTOSTART_DIR="$HOME/.config/autostart"
+mkdir -p "$AUTOSTART_DIR"
+cat > "$AUTOSTART_DIR/filetree-daemon.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=FileTree Daemon
+Comment=Pre-warm FileTree file manager
+Exec=$WRAPPER --daemon
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-XFCE-Autostart-Override=true
+EOF
+ok "Autostart создан: $AUTOSTART_DIR/filetree-daemon.desktop"
+
+# ─── 10. PATH в .bashrc, .profile, .xprofile ─────────────────────────
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+for rcfile in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.xprofile"; do
+  grep -qF 'local/bin' "$rcfile" 2>/dev/null || echo "$PATH_LINE" >> "$rcfile"
+done
 export PATH="$HOME/.local/bin:$PATH"
+ok "PATH обновлён в .bashrc / .profile / .xprofile"
 
+# ─── 11. Перезапуск XFCE-компонентов ─────────────────────────────────
+log "Применение настроек XFCE..."
 pkill -f "Thunar" 2>/dev/null || true
-xfdesktop --reload 2>/dev/null || true
-sleep 1
-ok "Зарегистрирован как файловый менеджер по умолчанию"
+pkill -f "thunar" 2>/dev/null || true
+sleep 0.5
+
+# Перезагрузить базу данных Thunar/XFCE (если установлена)
+if command -v xfce4-terminal &>/dev/null || [ -d "$HOME/.config/xfce4" ]; then
+  xfdesktop --reload 2>/dev/null || true
+fi
+
+# Обновить gio (GLib) кэш иконок и mime-ассоциаций
+if command -v gio &>/dev/null; then
+  gio mime inode/directory filetree.desktop 2>/dev/null || true
+  ok "gio mime: inode/directory → filetree"
+fi
+
+# update-alternatives (системный уровень, если доступен sudo)
+if sudo -n true 2>/dev/null && command -v update-alternatives &>/dev/null; then
+  sudo update-alternatives --install /usr/bin/x-file-manager x-file-manager "$WRAPPER" 100 2>/dev/null || true
+  sudo update-alternatives --set x-file-manager "$WRAPPER" 2>/dev/null \
+    || sudo update-alternatives --auto x-file-manager 2>/dev/null || true
+  ok "update-alternatives: x-file-manager → filetree"
+else
+  warn "update-alternatives пропущен (нет sudo или не установлен)"
+fi
+
+ok "Зарегистрирован как файловый менеджер по умолчанию (системно + пользователь)"
 
 # ─── Запуск ──────────────────────────────────────────────────────────
 log "Запуск FileTree..."
@@ -258,4 +378,4 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 export DISPLAY="${DISPLAY:-:0}"
 cd "$DIR"
-"$ELECTRON_BIN" . --no-sandbox
+exec "$ELECTRON_BIN" . --no-sandbox
