@@ -215,7 +215,9 @@ DESKTOP_FILE="$HOME/.local/share/applications/filetree.desktop"
 mkdir -p "$HOME/.local/share/applications"
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
+Version=1.0
 Name=FileTree
+GenericName=File Manager
 Comment=Custom file manager
 Exec=$ELECTRON_BIN $DIR --no-sandbox %U
 Icon=system-file-manager
@@ -224,29 +226,25 @@ Type=Application
 Categories=System;FileManager;
 MimeType=inode/directory;
 StartupNotify=true
+X-XFCE-Binaries=electron
+X-XFCE-Category=FileManager
 EOF
 
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 xdg-mime default filetree.desktop inode/directory 2>/dev/null || true
 
-# XFCE читает дефолтные приложения из helpers.rc
+# Записываем в helpers.rc напрямую
 mkdir -p "$HOME/.config/xfce4"
 HELPERS_RC="$HOME/.config/xfce4/helpers.rc"
-if [ -f "$HELPERS_RC" ]; then
-  # Заменяем существующую строку FileManager
+if grep -q "^FileManager=" "$HELPERS_RC" 2>/dev/null; then
   sed -i 's/^FileManager=.*/FileManager=filetree/' "$HELPERS_RC"
-  # Если строки не было — добавляем
-  grep -q "^FileManager=" "$HELPERS_RC" || echo "FileManager=filetree" >> "$HELPERS_RC"
 else
-  echo "FileManager=filetree" > "$HELPERS_RC"
+  echo "FileManager=filetree" >> "$HELPERS_RC"
 fi
 
-ok "Зарегистрирован как файловый менеджер по умолчанию"
-
-# Перезапускаем xfce-helper daemon чтобы изменения применились
-pkill -f xfce4-mime-helper 2>/dev/null || true
 pkill -f Thunar 2>/dev/null || true
 sleep 1
+ok "Зарегистрирован как файловый менеджер по умолчанию"
 
 # ─── 8. Запуск ───────────────────────────────────────────────────────
 log "Запуск FileTree..."
