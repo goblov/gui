@@ -110,6 +110,7 @@ PYEOF
 if [ ! -f "$VITE_BIN" ]; then
   log "Installing React + Vite..."
   cd "$DIR"
+  npm config set registry https://registry.npmmirror.com
   npm install || fail "npm install failed"
   ok "React + Vite installed"
 else
@@ -119,6 +120,7 @@ fi
 if [ ! -f "$ELECTRON_BIN" ]; then
   log "Installing Electron..."
   cd "$DIR"
+  npm config set registry https://registry.npmmirror.com
   export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
   npm install electron@28 --save-dev || fail "Cannot install Electron"
   ok "Electron installed"
