@@ -258,6 +258,7 @@ fi
 # Убиваем Thunar daemon и exo чтобы сбросить кэш
 pkill -f "Thunar --daemon" 2>/dev/null || true
 pkill -f Thunar 2>/dev/null || true
+xfdesktop --reload 2>/dev/null || pkill -HUP xfdesktop 2>/dev/null || true
 sleep 1
 
 ok "Зарегистрирован как файловый менеджер по умолчанию"
