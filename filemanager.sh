@@ -211,30 +211,48 @@ else
 fi
 
 # ─── 7. Регистрация как файловый менеджер ────────────────────────────
+
+# Wrapper-скрипт в PATH — exo проверяет что бинарник существует
+cat > /usr/local/bin/filetree << 'WEOF'
+#!/bin/bash
+ELECTRON_BIN="$HOME/.filetree/node_modules/.bin/electron"
+DIR="$HOME/.filetree"
+export DISPLAY="${DISPLAY:-:0}"
+exec "$ELECTRON_BIN" "$DIR" --no-sandbox "$@"
+WEOF
+chmod +x /usr/local/bin/filetree
+
 DESKTOP_FILE="$HOME/.local/share/applications/filetree.desktop"
 mkdir -p "$HOME/.local/share/applications"
-cat > "$DESKTOP_FILE" << EOF
+cat > "$DESKTOP_FILE" << 'DEOF'
 [Desktop Entry]
 Version=1.0
 Name=FileTree
 GenericName=File Manager
 Comment=Custom file manager
-Exec=$ELECTRON_BIN $DIR --no-sandbox %U
+Exec=filetree %U
 Icon=system-file-manager
 Terminal=false
 Type=Application
 Categories=System;FileManager;
-MimeType=inode/directory;
+MimeType=inode/directory;x-directory/normal;
 StartupNotify=true
-X-XFCE-Binaries=$ELECTRON_BIN
+X-XFCE-Binaries=filetree
 X-XFCE-Category=FileManager
-EOF
+DEOF
 
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-xdg-mime default filetree.desktop inode/directory 2>/dev/null || true
-xdg-mime default filetree.desktop x-directory/normal 2>/dev/null || true
 
-# helpers.rc — основной конфиг exo для XFCE
+# mimeapps.list
+MIMEAPPS="$HOME/.config/mimeapps.list"
+mkdir -p "$HOME/.config"
+grep -q "^\[Default Applications\]" "$MIMEAPPS" 2>/dev/null || echo "[Default Applications]" > "$MIMEAPPS"
+sed -i '/^inode\/directory=/d' "$MIMEAPPS" 2>/dev/null || true
+sed -i '/^x-directory\/normal=/d' "$MIMEAPPS" 2>/dev/null || true
+sed -i '/^\[Default Applications\]/a inode\/directory=filetree.desktop' "$MIMEAPPS"
+sed -i '/^\[Default Applications\]/a x-directory\/normal=filetree.desktop' "$MIMEAPPS"
+
+# helpers.rc
 mkdir -p "$HOME/.config/xfce4"
 HELPERS_RC="$HOME/.config/xfce4/helpers.rc"
 if grep -q "^FileManager=" "$HELPERS_RC" 2>/dev/null; then
@@ -243,22 +261,8 @@ else
   echo "FileManager=filetree" >> "$HELPERS_RC"
 fi
 
-# mimeapps.list — системный список ассоциаций
-MIMEAPPS="$HOME/.config/mimeapps.list"
-mkdir -p "$HOME/.config"
-if [ ! -f "$MIMEAPPS" ]; then
-  echo "[Default Applications]" > "$MIMEAPPS"
-fi
-if grep -q "inode/directory=" "$MIMEAPPS" 2>/dev/null; then
-  sed -i 's|inode/directory=.*|inode/directory=filetree.desktop|' "$MIMEAPPS"
-else
-  sed -i '/^\[Default Applications\]/a inode/directory=filetree.desktop' "$MIMEAPPS"
-fi
-
-# Убиваем Thunar daemon и exo чтобы сбросить кэш
-pkill -f "Thunar --daemon" 2>/dev/null || true
-pkill -f Thunar 2>/dev/null || true
-xfdesktop --reload 2>/dev/null || pkill -HUP xfdesktop 2>/dev/null || true
+pkill -f "Thunar" 2>/dev/null || true
+xfdesktop --reload 2>/dev/null || true
 sleep 1
 
 ok "Зарегистрирован как файловый менеджер по умолчанию"
