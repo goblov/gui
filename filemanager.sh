@@ -113,6 +113,15 @@ cd "$DIR"
 "$VITE_BIN" build --logLevel warn || fail "Build failed"
 ok "Build complete"
 
+# === REMOVE THUNAR ===
+log "Removing Thunar..."
+if command -v thunar &>/dev/null; then
+  sudo apt-get remove -y thunar thunar-archive-plugin thunar-media-tags-plugin thunar-volman 2>/dev/null || true
+  ok "Thunar removed"
+else
+  ok "Thunar not installed -- skip"
+fi
+
 # === REGISTRATION ===
 log "Registering as default file manager..."
 
